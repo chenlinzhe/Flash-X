@@ -87,6 +87,7 @@ public sealed class ScanWindow : Window
     private DateTime? _historyFinishedUtc;
     private ScanHistoryOverview? _historyPreview;
     private int _previewNodeId;
+    private bool _restoringHistoryView;
     private (string Path, long Length, DateTime WriteUtc)? _loadedSnapshot;
     private bool _selectingTreeContext;
     private readonly DataGrid _table = new() { AutoGenerateColumns = false, EnableRowVirtualization = true, EnableColumnVirtualization = true, IsReadOnly = true, CanUserAddRows = false, CanUserDeleteRows = false, SelectionMode = DataGridSelectionMode.Single };
@@ -140,7 +141,7 @@ public sealed class ScanWindow : Window
 
     public ScanWindow(string? initialPath, string? snapshotPath = null)
     {
-        Title = "FolderScope v2026.11.16.3 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
+        Title = "FolderScope v2026.11.16.5 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Resources.MergedDictionaries.Add(InterfaceTheme.Create());
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
@@ -417,7 +418,7 @@ public sealed class ScanWindow : Window
         _tree.RequestBringIntoView += (_, e) => { if (_selectingTreeContext) e.Handled = true; };
         _tree.SelectedItemChanged += (_, e) =>
         {
-            if (e.NewValue is not TreeViewItem { Tag: int id }) return;
+            if (_restoringHistoryView || e.NewValue is not TreeViewItem { Tag: int id }) return;
             if (_historyPreview is { } preview && e.NewValue is TreeViewItem { DataContext: ValueTuple<ScanNode, long> selection })
                 ShowHistoryPreviewRows(preview, selection.Item1, selection.Item2);
             else SelectFolder(id);
@@ -1254,6 +1255,7 @@ public sealed class ScanWindow : Window
         if (source is null && dialog.ShowDialog(this) != true) return;
         var snapshotFile = Path.GetFullPath(source ?? dialog.FileName);
         Action? restorePreview = null;
+        int? resumeBrowseOffset = null;
         var reportChanged = false;
         _busy = true; _scan.IsEnabled = _export.IsEnabled = false;
         _cancellation = new CancellationTokenSource(); _cancel.IsEnabled = true;
@@ -1271,6 +1273,7 @@ public sealed class ScanWindow : Window
                 return;
             }
 
+            resumeBrowseOffset = _browseCancellation is null ? null : _browseOffset;
             _status.Text = automatic ? "正在恢复上次扫描结果…" : "正在载入扫描记录…";
             var overview = await Task.Run(() => ScanHistoryOverview.TryRead(snapshotFile), token);
             token.ThrowIfCancellationRequested();
@@ -1278,6 +1281,8 @@ public sealed class ScanWindow : Window
             {
                 var previousTree = _tree.Items.Cast<object>().ToArray();
                 var previousRows = _table.ItemsSource;
+                var previousSelection = _tree.SelectedItem as TreeViewItem;
+                var previousFilePager = _filePager.Visibility;
                 var previousPath = _selectedPath.Text;
                 var previousSummary = _summary.Text;
                 var previousAllocation = _allocatedColumn.Visibility;
@@ -1287,9 +1292,20 @@ public sealed class ScanWindow : Window
                 var previousFolderPager = _folderPager.Visibility;
                 restorePreview = () =>
                 {
-                    _tree.Items.Clear();
-                    foreach (var item in previousTree) _tree.Items.Add(item);
+                    _restoringHistoryView = true;
+                    try
+                    {
+                        _tree.Items.Clear();
+                        foreach (var item in previousTree) _tree.Items.Add(item);
+                        if (previousSelection is not null && !ReferenceEquals(_tree.SelectedItem, previousSelection))
+                        {
+                            previousSelection.IsSelected = false;
+                            previousSelection.IsSelected = true;
+                        }
+                    }
+                    finally { _restoringHistoryView = false; }
                     _table.ItemsSource = previousRows;
+                    _filePager.Visibility = previousFilePager;
                     _selectedPath.Text = previousPath;
                     _summary.Text = previousSummary;
                     _allocatedColumn.Visibility = previousAllocation;
@@ -1375,7 +1391,8 @@ public sealed class ScanWindow : Window
             _scan.IsEnabled = true;
             _export.IsEnabled = _report != null;
             SetProgress(false);
-            if (reportChanged || restorePreview is not null) BeginFolderFiles(0);
+            if (reportChanged) BeginFolderFiles(0);
+            else if (resumeBrowseOffset is int offset) BeginFolderFiles(offset);
         }
     }
     private async Task ShowReport(string kind)
@@ -1398,13 +1415,31 @@ public sealed class ScanWindow : Window
         var token = _cancellation.Token;
         List<NodeRow> rows;
         bool partialGlobalResult;
+        string? missingDetails;
         try
         {
-            IEnumerable<ScanNode> candidates = report.Nodes.Skip(1);
-            if (globalSize && !report.RetainsFileNodes && report.FileDetailsPath is string details)
-                candidates = candidates.Concat(FileDetailStore.ReadAllFiles(details, report.FileDetailsStoreId, token));
-            (rows, partialGlobalResult) = await Task.Run(() => (ReportQuery.SelectTop(candidates, scope, order, 10000, filter, token)
-                .Select(n => new NodeRow(n, PercentBase(report, n, report.Root.TotalBytes), directoryCounts.GetValueOrDefault(n.Id), report.MeasuresAllocatedSpace, report.MinimumFileBytes)).ToList(), globalSize && !report.Complete));
+            (rows, partialGlobalResult, missingDetails) = await Task.Run(() =>
+            {
+                IEnumerable<ScanNode> directories = report.Nodes.Skip(1);
+                List<NodeRow> SelectRows(IEnumerable<ScanNode> candidates) =>
+                    ReportQuery.SelectTop(candidates, scope, order, 10000, filter, token)
+                        .Select(n => new NodeRow(n, PercentBase(report, n, report.Root.TotalBytes),
+                            directoryCounts.GetValueOrDefault(n.Id), report.MeasuresAllocatedSpace, report.MinimumFileBytes)).ToList();
+
+                var partial = globalSize && !report.Complete;
+                if (!globalSize || report.RetainsFileNodes) return (SelectRows(directories), partial, (string?)null);
+                if (report.FileDetailsPath is not string details)
+                    return (SelectRows(directories), partial, "未保存文件明细");
+                try
+                {
+                    return (SelectRows(directories.Concat(FileDetailStore.ReadAllFiles(details, report.FileDetailsStoreId, token))),
+                        partial, (string?)null);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException)
+                {
+                    return (SelectRows(directories), partial, "文件明细不可读");
+                }
+            });
             token.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { _status.Text = "报表已取消，保留之前视图。"; return; }
@@ -1413,13 +1448,14 @@ public sealed class ScanWindow : Window
         finally { _busy = false; _scan.IsEnabled = true; _export.IsEnabled = _report != null; _cancel.IsEnabled = false; _cancellation.Dispose(); _cancellation = null; }
         if (!ReferenceEquals(_report, report)) return;
         _selectedPath.Text = kind + "（最多显示10000项，临时限制） · " + _report.RootPath + (order is ReportOrder.Oldest or ReportOrder.Newest ? " · 当前按修改时间" : "");
-        if (globalSize && !report.RetainsFileNodes && report.FileDetailsPath is null) _selectedPath.Text += " · 仅有目录汇总，未保存文件明细";
+        if (missingDetails is not null) _selectedPath.Text += " · 仅显示目录：" + missingDetails;
         if (report.MinimumFileBytes > 0) _selectedPath.Text += $" · 快速估算门槛 > {report.MinimumFileBytes / 1048576} MiB，估算仅累计符合门槛的文件";
         if (_filterDescription.Length > 0)
             _selectedPath.Text += " · 列表筛选：" + (_filterExclude ? "排除 " : "") + _filterDescription + "（扫描总量和导出为全部项）";
         _table.ItemsSource = rows; _folderPager.Visibility = Visibility.Collapsed;
         _filePager.Visibility = Visibility.Collapsed;
         _status.Text = (globalSize ? "筛选完成 · 显示 " : "报表已生成 · 显示 ") + rows.Count.ToString("N0") + " 项" + (rows.Count == 10000 ? "（显示上限 10,000 项）" : "");
+        if (missingDetails is not null) _status.Text += " · 仅筛选目录，" + missingDetails;
         if (partialGlobalResult)
             _status.Text += " · 原扫描不完整，仍可能有其他项目达到门槛";
         _chartCancellation?.Cancel(); ++_chartRequest; _chart.SetNodes([]); // A global report is not a disjoint directory breakdown.
