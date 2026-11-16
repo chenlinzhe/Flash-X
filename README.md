@@ -1,12 +1,12 @@
-# Flash - Folder（FF）
+# Flash-X
 
 **闪电般定位大文件，用 AI 看懂目录，快速制定清理方案。**
 
-Flash - Folder 是 Windows 磁盘空间分析工具。选一个目录、一个盘符或整个电脑，即可找到空间主要用在哪，并把扫描证据交给 AI 进一步分析。
+Flash-X 是 Windows 磁盘空间分析工具。选一个目录、一个盘符或整个电脑，即可找到空间主要用在哪，并把扫描证据交给 AI 进一步分析。
 
-![Flash - Folder 桌面界面，展示目录树、大小列表、AI 分析和导出入口](docs/images/ff-desktop.png)
+![Flash-X 桌面界面，展示目录树、大小列表、AI 分析和导出入口](docs/images/ff-desktop.png)
 
-*新版界面。路径、统计和 AI 回复为演示数据。*
+*界面演示。路径、统计和 AI 回复为示例，图中标题沿用旧名。*
 
 ## 三个核心能力
 

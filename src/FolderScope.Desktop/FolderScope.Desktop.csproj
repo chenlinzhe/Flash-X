@@ -3,6 +3,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
+    <Product>Flash-X</Product>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../FolderScope.Core/FolderScope.Core.csproj" /></ItemGroup>
   <ItemGroup><EmbeddedResource Include="ModelPresets.json" LogicalName="FolderScope.ModelPresets.json" /></ItemGroup>

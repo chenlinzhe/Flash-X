@@ -16,7 +16,7 @@ public static class AnalysisReportWriter
             if (largestFiles.Count > 50) largestFiles.Dequeue();
         }
         var text = new StringBuilder();
-        text.AppendLine("# Flash - Folder (FF) AI 分析摘要");
+        text.AppendLine("# Flash-X AI 分析摘要");
         text.AppendLine($"扫描目标：{Clean(report.RootPath)}\n扫描时间（UTC）：{report.FinishedUtc:O}\n状态：{(report.Cancelled ? "已取消，部分结果" : report.Complete ? "已完成" : "部分结果，存在未读取项")}");
         text.AppendLine($"文件逻辑大小合计：{report.Root.TotalBytes} 字节；文件数：{report.Root.TotalFiles}；目录数：{report.Root.TotalDirectories}。");
         text.AppendLine($"快速估算门槛：{report.MinimumFileBytes} 字节（0 表示全部；非零时仅累计严格大于门槛的文件）；排除小文件数：{report.EstimateExcludedFiles}。");

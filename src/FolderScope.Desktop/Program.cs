@@ -37,7 +37,7 @@ public static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => RecordLifecycle("process-exit-code-" + Environment.ExitCode);
         try { ResponsivenessWatchdog.Start(); }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        { MessageBox.Show("无响应保护未能启动：" + ex.Message, "Flash - Folder"); return; }
+        { MessageBox.Show("无响应保护未能启动：" + ex.Message, "Flash-X"); return; }
         var application = new Application();
         var window = new ScanWindow(args.FirstOrDefault() == "--snapshot" ? null : args.FirstOrDefault(), args.Length == 2 && args[0] == "--snapshot" ? args[1] : null);
         void ProtectionFailed(string reason) => window.Dispatcher.BeginInvoke(new Action(() => window.ReportProtectionFailure(reason)));
@@ -141,7 +141,7 @@ public sealed class ScanWindow : Window
 
     public ScanWindow(string? initialPath, string? snapshotPath = null)
     {
-        Title = "Flash - Folder (FF) v2026.11.16.7 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
+        Title = "Flash-X v2026.11.16.8 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Resources.MergedDictionaries.Add(InterfaceTheme.Create());
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
@@ -891,7 +891,7 @@ public sealed class ScanWindow : Window
         hangProbe.Click += (_, _) =>
         {
             if (_busy) return;
-            Title = "Flash - Folder · 180秒无响应保护测试";
+            Title = "Flash-X · 180秒无响应保护测试";
             Dispatcher.BeginInvoke(new Action(() => System.Threading.Thread.Sleep(TimeSpan.FromMinutes(4))), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         };
         diagnostics.Items.Add(hangProbe);
@@ -1254,7 +1254,7 @@ public sealed class ScanWindow : Window
     private async Task LoadReport(string? source = null, bool automatic = false)
     {
         if (_busy) return;
-        var dialog = new OpenFileDialog { Title = "打开 Flash - Folder 扫描结果", Filter = "Flash - Folder JSON|*.json" };
+        var dialog = new OpenFileDialog { Title = "打开 Flash-X 扫描结果", Filter = "Flash-X JSON|*.json" };
         if (source is null && dialog.ShowDialog(this) != true) return;
         var snapshotFile = Path.GetFullPath(source ?? dialog.FileName);
         Action? restorePreview = null;
