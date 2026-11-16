@@ -37,7 +37,10 @@ public static class ScanDiagnostics
     };
     public static string DescribeNode(ScanNode node)
     {
-        if (node.LinkSkipped) return "链接或重解析项已跳过";
+        if (node.LinkSkipped)
+            return FileSpaceReader.MayRecallData((FileAttributes)node.Attributes)
+                ? "离线或按需取回项已跳过；大小未知"
+                : "链接或重解析项已跳过";
         if (!node.Incomplete) return "";
         var reasons = new List<string>();
         var flags = node.IncompleteReasons;

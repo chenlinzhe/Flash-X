@@ -278,6 +278,18 @@ internal static class Program
                 && !LocalCodexClient.FailureMessage(1, "model_not_found SECRET").Contains("SECRET"), "Model failure is classified without raw diagnostics");
             Check(LocalCodexClient.FailureMessage(1, "os error 10061").Contains("代理"), "Network failure has actionable message");
             Check(LocalCodexClient.FailureMessage(1, "429 quota").Contains("额度"), "Quota failure has actionable message");
+            var rowType = typeof(ScanWindow).GetNestedType("NodeRow", BindingFlags.NonPublic)!;
+            (double? Value, string Text) Percentage(FolderScope.Core.ScanNode node)
+            {
+                var row = Activator.CreateInstance(rowType, node, 100L, 0, false, 0L)!;
+                return ((double?)rowType.GetProperty("PercentValue")!.GetValue(row),
+                    (string)rowType.GetProperty("Percent")!.GetValue(row)!);
+            }
+            var unknownPercent = Percentage(new FolderScope.Core.ScanNode { Name = "unknown", Path = "unknown", Incomplete = true });
+            var zeroPercent = Percentage(new FolderScope.Core.ScanNode { Name = "empty", Path = "empty" });
+            var partialPercent = Percentage(new FolderScope.Core.ScanNode { Name = "partial", Path = "partial", TotalBytes = 20, Incomplete = true });
+            Check(unknownPercent.Value is null && unknownPercent.Text == "—" && zeroPercent.Value == 0
+                && partialPercent.Value == 20 && partialPercent.Text.EndsWith("（已读）"), "Percentages distinguish unknown, real zero and partial values");
             var tinyScanRoot = Path.Combine(folder, "single-target");
             Directory.CreateDirectory(tinyScanRoot);
             var scopeWindow = new ScanWindow(null);

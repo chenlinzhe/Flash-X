@@ -175,6 +175,17 @@ internal static class AuditChecks
                     Require(cancelled && comparisons > 0 && comparisons <= 1024, "Mid-sort cancellation was lost or delayed");
                 }
             });
+            Check("offline skipped item is distinguished from a normal link and true zero", () =>
+            {
+                var offline = new ScanNode { Name = "offline", Path = "offline", LinkSkipped = true,
+                    Attributes = (int)(FileAttributes.Offline | FileAttributes.ReparsePoint) };
+                var link = new ScanNode { Name = "link", Path = "link", LinkSkipped = true,
+                    Attributes = (int)FileAttributes.ReparsePoint };
+                Require(ScanDiagnostics.DescribeNode(offline).Contains("按需取回")
+                    && !ScanDiagnostics.DescribeNode(link).Contains("按需取回")
+                    && NodeSizeStatus.SortableBytes(offline) is null,
+                    "Offline skipped size must remain unknown");
+            });
             Check("size bounds distinguish zero unknown and partial totals", () =>
             {
                 var empty = new ScanNode { Name = "empty", Path = "empty", TotalBytes = 0 };
@@ -286,6 +297,13 @@ internal static class AuditChecks
                     try { FileSpaceReader.Read(file); } catch (IOException ex) { modern = ex.Message.Contains("recall-marked"); }
                     try { AllocatedSpace.ReadFile(file); } catch (IOException ex) { legacy = ex.Message.Contains("recall-marked"); }
                     Require(modern && legacy, "An allocation reader bypassed offline protection");
+                    var page = DirectoryFileReader.Read(fixture, minimumFileBytes: 6);
+                    var listed = page.Files.Single();
+                    Require(listed.Name == "first.bin" && listed.TotalBytes == 7 && listed.TotalAllocatedBytes is null
+                        && FileSpaceReader.MayRecallData((FileAttributes)listed.Attributes),
+                        "Live file browsing confused the logical length with unavailable allocation");
+                    Require(DirectoryFileReader.Read(fixture, minimumFileBytes: 7).Files.Count == 0,
+                        "Live file browsing allowed an offline file exactly at the threshold");
                 }
                 finally { File.SetAttributes(file, original); }
             });
@@ -374,14 +392,38 @@ internal static class AuditChecks
                 Require(partialSort.SortingCancelled && partialSort.Children.Values.Sum(v => v.Count) == report.Nodes.Count - 1,
                     "Stopping scan sorting discarded entries");
             });
-            Check("allocation access failure preserves logical counts and unknown allocation", () =>
+            Check("allocation failures preserve logical counts and leave allocation unknown", () =>
             {
                 foreach (var retain in new[] { true, false })
+                foreach (var error in new Exception[] { new UnauthorizedAccessException("audit"), new InvalidDataException("audit") })
                 {
-                    var report = new DirectoryScanner(_ => throw new UnauthorizedAccessException("audit")).Scan(fixture, retainFileNodes: retain, measureAllocatedSpace: true);
+                    var report = new DirectoryScanner(_ => throw error).Scan(fixture, retainFileNodes: retain, measureAllocatedSpace: true);
+                    var expectedErrorCode = error is UnauthorizedAccessException ? (int?)5 : null;
                     Require(!report.Complete && report.Root.TotalBytes == 12 && report.Root.TotalFiles == 3
-                        && !report.Root.Incomplete && report.Root.TotalAllocatedBytes is null && report.Issues.Count == 3 && report.Issues.All(i => i.ErrorCode == 5), "Logical size was lost");
+                        && !report.Root.Incomplete && report.Root.TotalAllocatedBytes is null && report.Issues.Count == 3
+                        && report.Issues.All(i => i.ErrorCode == expectedErrorCode && i.Operation == "allocated-space"),
+                        "Allocation failure lost logical size or produced a fabricated allocation");
                 }
+            });
+            Check("invalid allocation metadata preserves disk detail after snapshot reload", () =>
+            {
+                var details = Path.Combine(scratch, "allocation-invalid.jsonl");
+                var snapshot = Path.Combine(scratch, "allocation-invalid.json");
+                var scanner = new DirectoryScanner(_ => throw new InvalidDataException("audit"));
+                ScanReport report;
+                using (var store = new FileDetailStore(details))
+                {
+                    report = scanner.Scan(fixture, retainFileNodes: false, measureAllocatedSpace: true, fileDetails: store);
+                    store.Finish(writeIndex: true);
+                }
+                ReportWriter.WriteHistorySnapshot(report, snapshot);
+                var restored = ReportReader.Read(snapshot);
+                var files = FileDetailStore.ReadAllFiles(details, restored.FileDetailsStoreId).ToArray();
+                Require(!restored.RetainsFileNodes && !restored.Complete && restored.Root.TotalFiles == 3
+                    && restored.Root.TotalBytes == 12 && restored.Root.TotalAllocatedBytes is null
+                    && files.Length == 3 && files.Sum(file => file.TotalBytes) == 12
+                    && files.All(file => file.TotalAllocatedBytes is null && NodeSizeStatus.Get(file) == NodeSizeState.Known),
+                    "Disk details lost logical size or turned unknown allocation into zero");
             });
             Check("pre-cancel and safety limits cannot claim a complete zero result", () =>
             {
@@ -429,8 +471,12 @@ internal static class AuditChecks
                 }
                 foreach (var retain in new[] { true, false })
                 {
-                    var report = new DirectoryScanner(Enumerate).Scan(fixture, retainFileNodes: retain);
+                    var updates = new List<ScanPreview>();
+                    var report = new DirectoryScanner(Enumerate).Scan(fixture, retainFileNodes: retain, preview: updates.Add);
                     var child = report.Nodes.Single(n => n.Name == "child");
+                    var preview = updates.Last(update => update.Path == child.Path);
+                    Require(preview.Enumerated && preview.Incomplete && preview.DirectBytes == 5,
+                        "Live preview lost the enumeration failure or the bytes already read");
                     Require(child.TotalBytes == 5 && report.Root.TotalBytes == 12 && !report.Complete, "Lost known bytes after enumeration failed");
                     Require(new[] { child, report.Root }.All(n => NodeSizeStatus.Get(n) == NodeSizeState.Partial && n.IncompleteReasons.HasFlag(ScanIncompleteReason.ReadError)), "Lost partial state or error reason");
                     Require(report.Issues.Any(i => i.Path == child.Path && i.Operation == "enumerate"), "Lost failing directory");

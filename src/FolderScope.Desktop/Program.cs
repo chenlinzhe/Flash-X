@@ -140,7 +140,7 @@ public sealed class ScanWindow : Window
 
     public ScanWindow(string? initialPath, string? snapshotPath = null)
     {
-        Title = "FolderScope v2026.11.15.9 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
+        Title = "FolderScope v2026.11.16.3 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Resources.MergedDictionaries.Add(InterfaceTheme.Create());
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
@@ -391,7 +391,7 @@ public sealed class ScanWindow : Window
         percentBar.SetValue(ProgressBar.ForegroundProperty, new SolidColorBrush(Color.FromRgb(173, 224, 195)));
         percentBar.SetValue(ProgressBar.BackgroundProperty, new SolidColorBrush(Color.FromRgb(237, 247, 241)));
         percentBar.SetValue(ProgressBar.BorderThicknessProperty, new Thickness(0));
-        percentBar.SetBinding(ProgressBar.ValueProperty, new Binding("PercentValue") { Mode = BindingMode.OneWay });
+        percentBar.SetBinding(ProgressBar.ValueProperty, new Binding("PercentValue") { Mode = BindingMode.OneWay, TargetNullValue = 0d });
         percentBar.SetBinding(UIElement.VisibilityProperty, new Binding("HasPercent") { Converter = new BooleanToVisibilityConverter() });
         percentFactory.AppendChild(percentBar);
         var percentText = new FrameworkElementFactory(typeof(TextBlock));
@@ -1509,7 +1509,11 @@ public sealed class ScanWindow : Window
                     else { _root.Items.Add(item); item.IsExpanded = true; }
                 }
                 item.Header = (string.IsNullOrEmpty(entry.Name) ? entry.Path : entry.Name)
-                    + (entry.Enumerated ? " · 已读直属 " + FormatBytes(entry.DirectBytes) : " · 等待读取");
+                    + (entry.Enumerated
+                        ? entry.Incomplete
+                            ? entry.DirectBytes == 0 ? " · 部分未读，直属大小未知" : " · 部分未读，直属至少 " + FormatBytes(entry.DirectBytes)
+                            : " · 已读直属 " + FormatBytes(entry.DirectBytes)
+                        : " · 等待读取");
                 item.ToolTip = entry.Path;
             }
         }
@@ -1558,9 +1562,9 @@ public sealed class ScanWindow : Window
         public long? SizeValue => NodeSizeStatus.SortableBytes(node);
         public string Size => DisplayNodeSize(node, minimumFileBytes);
         public string Allocated => !measuresAllocatedSpace ? "未开启统计" : node.HardLinkDuplicate ? "重复硬链接（已计入其他路径）" : node.TotalAllocatedBytes is long bytes ? FormatBytes(bytes) : "未知（未完整读取）";
-        public double PercentValue => parentBytes == 0 ? 0 : 100.0 * node.TotalBytes / parentBytes;
-        public bool HasPercent => parentBytes > 0 && !node.LinkSkipped;
-        public string Percent => parentBytes == 0 || node.LinkSkipped ? "—" : $"{PercentValue:F2}%" + (node.Incomplete ? "（已读）" : "");
+        public double? PercentValue => parentBytes > 0 && SizeValue is long bytes ? 100.0 * bytes / parentBytes : null;
+        public bool HasPercent => PercentValue.HasValue;
+        public string Percent => PercentValue is double percent ? $"{percent:F2}%" + (node.Incomplete ? "（已读）" : "") : "—";
         public string Created => node.CreatedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "";
         public string Accessed => node.AccessedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "";
         public string Modified => node.ModifiedUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "";

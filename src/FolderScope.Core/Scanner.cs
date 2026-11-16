@@ -50,7 +50,7 @@ public sealed class ScanNode
 
 public sealed record ScanIssue(string Path, string Operation, string Message, int? ErrorCode = null);
 public sealed record ScanProgress(int Entries, string Path);
-public sealed record ScanPreview(string Path, string? ParentPath, string Name, long DirectBytes, bool Enumerated);
+public sealed record ScanPreview(string Path, string? ParentPath, string Name, long DirectBytes, bool Enumerated, bool Incomplete = false);
 public sealed class ScanReport
 {
     public string Schema { get; } = "folderscope.scan.v1";
@@ -125,7 +125,9 @@ public sealed class DirectoryScanner
         var report = new ScanReport { RootPath = fullPath, StartedUtc = DateTime.UtcNow, RetainsFileNodes = retainFileNodes, MinimumFileBytes = minimumFileBytes, FileDetailsPath = fileDetails?.FilePath, FileDetailsStoreId = fileDetails?.StoreId, MeasuresAllocatedSpace = measureAllocatedSpace, AllocationTotalsVersion = measureAllocatedSpace ? 1 : 0 };
         var rootNode = NewNode(root, null, report);
         report.Nodes.Add(rootNode);
-        preview?.Invoke(new ScanPreview(fullPath, null, rootNode.Name.Length == 0 ? fullPath : rootNode.Name, 0, false));
+        var rootBlocked = rootNode.LinkSkipped || rootNode.Incomplete;
+        preview?.Invoke(new ScanPreview(fullPath, null, rootNode.Name.Length == 0 ? fullPath : rootNode.Name, 0,
+            Enumerated: rootBlocked, Incomplete: rootBlocked));
         var pending = new Stack<(DirectoryInfo Folder, int Id)>();
         if (!rootNode.LinkSkipped && !rootNode.Incomplete) pending.Push((root, 0));
         var options = new EnumerationOptions
@@ -213,7 +215,12 @@ public sealed class DirectoryScanner
                         var node = NewNode(item, id, report);
                         report.Nodes.Add(node);
                         if (!node.IsDirectory) retainedDirectBytes = checked(retainedDirectBytes + node.TotalBytes);
-                        else preview?.Invoke(new ScanPreview(node.Path, folder.FullName, node.Name, 0, false));
+                        else if (preview is not null)
+                        {
+                            var blocked = node.LinkSkipped || node.Incomplete;
+                            preview(new ScanPreview(node.Path, folder.FullName, node.Name, 0,
+                                Enumerated: blocked, Incomplete: blocked));
+                        }
                         if (item is DirectoryInfo child && !node.LinkSkipped && !node.Incomplete)
                             pending.Push((child, node.Id));
                     }
@@ -225,7 +232,7 @@ public sealed class DirectoryScanner
                 }
                 cancellationToken.ThrowIfCancellationRequested();
                 preview?.Invoke(new ScanPreview(folder.FullName, report.Nodes[id].ParentId is int parentId ? report.Nodes[parentId].Path : null,
-                    report.Nodes[id].Name, checked(retainedDirectBytes + report.Nodes[id].UnlistedFileBytes), true));
+                    report.Nodes[id].Name, checked(retainedDirectBytes + report.Nodes[id].UnlistedFileBytes), true, report.Nodes[id].Incomplete));
                 currentDirectoryId = null;
             }
         }
@@ -295,7 +302,7 @@ public sealed class DirectoryScanner
                     if (parent.TotalAllocatedBytes.HasValue) parent.TotalAllocatedBytes = checked(parent.TotalAllocatedBytes.Value + allocated);
                     parent.UnlistedAllocatedBytes = parent.TotalAllocatedBytes;
                 }
-                catch (Exception ex) when (IsFileSystemError(ex))
+                catch (Exception ex) when (IsFileSystemError(ex) || ex is InvalidDataException)
                 {
                     parent.UnlistedAllocatedBytes = parent.TotalAllocatedBytes = null;
                     report.AddIssue(ScanDiagnostics.Issue(file.FullName, "allocated-space", ex));
@@ -339,7 +346,7 @@ public sealed class DirectoryScanner
                     node.OwnAllocatedBytes = node.TotalAllocatedBytes = report.CountAllocatedSpace(space);
                     node.HardLinkDuplicate = report.DuplicateHardLinkPaths != previousDuplicates;
                     }
-                    catch (Exception ex) when (IsFileSystemError(ex))
+                    catch (Exception ex) when (IsFileSystemError(ex) || ex is InvalidDataException)
                     {
                         node.OwnAllocatedBytes = node.TotalAllocatedBytes = null;
                         report.AddIssue(ScanDiagnostics.Issue(info.FullName, "allocated-space", ex));
