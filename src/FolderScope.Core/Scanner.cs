@@ -168,7 +168,7 @@ public sealed class DirectoryScanner
                         if (excludedFullPath is not null && item is DirectoryInfo && IsSamePath(item.FullName, excludedFullPath))
                         {
                             MarkIncomplete(report.Nodes[id], ScanIncompleteReason.ReadError);
-                            report.AddIssue(new ScanIssue(excludedFullPath, "scan-cache-excluded", "FolderScope 扫描缓存目录已排除，避免把本次扫描输出再次计入扫描结果。"));
+                            report.AddIssue(new ScanIssue(excludedFullPath, "scan-cache-excluded", "FF 扫描缓存目录已排除，避免把本次扫描输出再次计入扫描结果。"));
                             continue;
                         }
                         if (minimumFileBytes > 0 && item is FileInfo thresholdFile)

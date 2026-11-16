@@ -543,6 +543,21 @@ internal static class AuditChecks
                     "Compact history changed report mode, totals or zero-byte detail");
                 Console.WriteLine($"Compact fixture: {new FileInfo(exported).Length} -> {new FileInfo(compact).Length} bytes");
             });
+            Check("allocated ranking uses deduplicated bytes and skips unknown allocations", () =>
+            {
+                var nodes = new[]
+                {
+                    new ScanNode { Name = "logical-large", Path = "logical-large", TotalBytes = 1000, TotalAllocatedBytes = 0 },
+                    new ScanNode { Name = "unknown", Path = "unknown", TotalBytes = 1000 },
+                    new ScanNode { Name = "allocated-large", Path = "allocated-large", TotalBytes = 20, TotalAllocatedBytes = 50 },
+                    new ScanNode { Name = "duplicate", Path = "duplicate", TotalBytes = 20, FileAllocatedBytes = 50,
+                        TotalAllocatedBytes = 0, HardLinkDuplicate = true }
+                };
+                var ranked = ReportQuery.SelectTop(nodes, ReportScope.All, ReportOrder.LargestAllocated, 10, null, default);
+                Require(ranked.Count == 3 && ranked[0].Name == "allocated-large"
+                    && ranked.Skip(1).All(node => node.TotalAllocatedBytes == 0),
+                    "Allocation ranking used logical bytes or mixed unknown with zero");
+            });
             Check("global ranking includes exact GiB across stored parents", () =>
             {
                 const long gib = 1L << 30;

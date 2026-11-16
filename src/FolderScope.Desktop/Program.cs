@@ -37,7 +37,7 @@ public static class Program
         AppDomain.CurrentDomain.ProcessExit += (_, _) => RecordLifecycle("process-exit-code-" + Environment.ExitCode);
         try { ResponsivenessWatchdog.Start(); }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-        { MessageBox.Show("无响应保护未能启动：" + ex.Message, "FolderScope"); return; }
+        { MessageBox.Show("无响应保护未能启动：" + ex.Message, "Flash - Folder"); return; }
         var application = new Application();
         var window = new ScanWindow(args.FirstOrDefault() == "--snapshot" ? null : args.FirstOrDefault(), args.Length == 2 && args[0] == "--snapshot" ? args[1] : null);
         void ProtectionFailed(string reason) => window.Dispatcher.BeginInvoke(new Action(() => window.ReportProtectionFailure(reason)));
@@ -141,7 +141,7 @@ public sealed class ScanWindow : Window
 
     public ScanWindow(string? initialPath, string? snapshotPath = null)
     {
-        Title = "FolderScope v2026.11.16.5 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
+        Title = "Flash - Folder (FF) v2026.11.16.7 · 磁盘空间分析"; Width = 1120; Height = 730; MinWidth = 800; MinHeight = 530;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Resources.MergedDictionaries.Add(InterfaceTheme.Create());
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI"); FontSize = 13;
@@ -861,6 +861,9 @@ public sealed class ScanWindow : Window
         };
         scan.Items.Add(clearFilter);
         var view = new MenuItem { Header = "查看" }; menu.Items.Add(view);
+        var allocatedRank = new MenuItem { Header = "全局实际占用排序" };
+        allocatedRank.Click += async (_, _) => await ShowReport("全局实际占用排序");
+        view.Items.Add(allocatedRank);
         var up = new MenuItem { Header = "上一级" }; up.Click += (_, _) => NavigateUp(); view.Items.Add(up);
         var chart = new MenuItem { Header = "显示图表", IsCheckable = true, IsChecked = true };
         view.SubmenuOpened += (_, _) => chart.IsChecked = _chartRow.Height.Value > 0;
@@ -888,7 +891,7 @@ public sealed class ScanWindow : Window
         hangProbe.Click += (_, _) =>
         {
             if (_busy) return;
-            Title = "FolderScope · 180秒无响应保护测试";
+            Title = "Flash - Folder · 180秒无响应保护测试";
             Dispatcher.BeginInvoke(new Action(() => System.Threading.Thread.Sleep(TimeSpan.FromMinutes(4))), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         };
         diagnostics.Items.Add(hangProbe);
@@ -1251,7 +1254,7 @@ public sealed class ScanWindow : Window
     private async Task LoadReport(string? source = null, bool automatic = false)
     {
         if (_busy) return;
-        var dialog = new OpenFileDialog { Title = "打开 FolderScope 扫描结果", Filter = "FolderScope JSON|*.json" };
+        var dialog = new OpenFileDialog { Title = "打开 Flash - Folder 扫描结果", Filter = "Flash - Folder JSON|*.json" };
         if (source is null && dialog.ShowDialog(this) != true) return;
         var snapshotFile = Path.GetFullPath(source ?? dialog.FileName);
         Action? restorePreview = null;
@@ -1403,9 +1406,15 @@ public sealed class ScanWindow : Window
         { _status.Text = "目录汇总模式未保留文件明细，不能生成该完整报表。"; return; }
         if (kind == "文件和目录") { SelectFolder(_currentFolderId); return; }
         var scope = kind.EndsWith("文件和目录") || kind == "最长路径" ? ReportScope.All : kind.EndsWith("目录") ? ReportScope.Directories : ReportScope.Files;
-        var globalSize = kind == "全局大小筛选";
+        var byAllocation = kind == "全局实际占用排序";
+        if (byAllocation && !_report.MeasuresAllocatedSpace)
+        {
+            _status.Text = "此记录未统计实际占用。请在“扫描”菜单开启统计后重新扫描。";
+            return;
+        }
+        var globalSize = kind == "全局大小筛选" || byAllocation;
         if (globalSize) scope = ReportScope.All;
-        var order = globalSize || kind.StartsWith("最大") ? ReportOrder.Largest : kind.StartsWith("最旧") ? ReportOrder.Oldest : kind.StartsWith("最新") ? ReportOrder.Newest : ReportOrder.LongestPath;
+        var order = byAllocation ? ReportOrder.LargestAllocated : globalSize || kind.StartsWith("最大") ? ReportOrder.Largest : kind.StartsWith("最旧") ? ReportOrder.Oldest : kind.StartsWith("最新") ? ReportOrder.Newest : ReportOrder.LongestPath;
         var report = _report;
         var filter = _nameFilter;
         var directoryCounts = _directDirectoryCounts;
@@ -1448,6 +1457,7 @@ public sealed class ScanWindow : Window
         finally { _busy = false; _scan.IsEnabled = true; _export.IsEnabled = _report != null; _cancel.IsEnabled = false; _cancellation.Dispose(); _cancellation = null; }
         if (!ReferenceEquals(_report, report)) return;
         _selectedPath.Text = kind + "（最多显示10000项，临时限制） · " + _report.RootPath + (order is ReportOrder.Oldest or ReportOrder.Newest ? " · 当前按修改时间" : "");
+        if (byAllocation) _selectedPath.Text += " · 占用未知项不参与排序，硬链接按去重占用";
         if (missingDetails is not null) _selectedPath.Text += " · 仅显示目录：" + missingDetails;
         if (report.MinimumFileBytes > 0) _selectedPath.Text += $" · 快速估算门槛 > {report.MinimumFileBytes / 1048576} MiB，估算仅累计符合门槛的文件";
         if (_filterDescription.Length > 0)
@@ -1464,7 +1474,7 @@ public sealed class ScanWindow : Window
     {
         if (_report is null || _busy) return;
         CancelFolderBrowse();
-        var dialog = new SaveFileDialog { Title = "导出扫描结果或 AI 分析摘要", FileName = "folderscope-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), DefaultExt = ".md", Filter = "AI 分析摘要（Markdown）|*.md|JSON 扫描快照|*.json|CSV 统计表|*.csv|XML 统计表|*.xml", OverwritePrompt = false };
+        var dialog = new SaveFileDialog { Title = "导出扫描结果或 AI 分析摘要", FileName = "ff-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), DefaultExt = ".md", Filter = "AI 分析摘要（Markdown）|*.md|JSON 扫描快照|*.json|CSV 统计表|*.csv|XML 统计表|*.xml", OverwritePrompt = false };
         if (dialog.ShowDialog(this) != true) return;
         var report = _report;
         _export.IsEnabled = _scan.IsEnabled = false;

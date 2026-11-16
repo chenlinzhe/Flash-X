@@ -75,7 +75,7 @@ internal static class LocalCodexClient
         // Do not expose raw CLI output: it can contain prompts, account data or credentials.
         if (error.Contains("invalid utf-8", StringComparison.OrdinalIgnoreCase)
             || error.Contains("not valid utf-8", StringComparison.OrdinalIgnoreCase))
-            return "Codex CLI 无法读取分析文字，请更新 FolderScope 和本机 Codex CLI 后重试。";
+            return "Codex CLI 无法读取分析文字，请更新 Flash - Folder 和本机 Codex CLI 后重试。";
         if (error.Contains("model_not_found", StringComparison.OrdinalIgnoreCase)
             || error.Contains("model is not supported", StringComparison.OrdinalIgnoreCase))
             return "当前登录账户不支持所选 Codex 模型，请在模型设置中更换模型 ID，或留空使用 CLI 内置默认模型。";

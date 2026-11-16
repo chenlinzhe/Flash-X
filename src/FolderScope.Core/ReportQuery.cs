@@ -1,7 +1,7 @@
 namespace FolderScope.Core;
 
 public enum ReportScope { Files, Directories, All }
-public enum ReportOrder { Largest, Oldest, Newest, LongestPath }
+public enum ReportOrder { Largest, Oldest, Newest, LongestPath, LargestAllocated }
 
 public static class ReportQuery
 {
@@ -25,6 +25,7 @@ public static class ReportQuery
             var value = order switch
             {
                 ReportOrder.Largest => Nullable.Compare(NodeSizeStatus.SortableBytes(b), NodeSizeStatus.SortableBytes(a)),
+                ReportOrder.LargestAllocated => Nullable.Compare(b.TotalAllocatedBytes, a.TotalAllocatedBytes),
                 ReportOrder.Oldest => Nullable.Compare(a.ModifiedUtc, b.ModifiedUtc),
                 ReportOrder.Newest => Nullable.Compare(b.ModifiedUtc, a.ModifiedUtc),
                 _ => b.PathLength.CompareTo(a.PathLength)
@@ -37,6 +38,7 @@ public static class ReportQuery
             cancellationToken.ThrowIfCancellationRequested();
             if (node.LinkSkipped || scope == ReportScope.Files && node.IsDirectory || scope == ReportScope.Directories && !node.IsDirectory) continue;
             if ((order is ReportOrder.Oldest or ReportOrder.Newest) && !node.ModifiedUtc.HasValue) continue;
+            if (order == ReportOrder.LargestAllocated && node.TotalAllocatedBytes is null) continue;
             if (filter is not null && !filter(node)) continue;
             if (heap.Count < limit) heap.Enqueue(node, node);
             else if (Compare(node, heap.Peek()) < 0) { heap.Dequeue(); heap.Enqueue(node, node); }
@@ -59,6 +61,7 @@ public static class ReportQuery
         return order switch
         {
             ReportOrder.Largest => nodes.OrderByDescending(NodeSizeStatus.SortableBytes).ThenBy(n => n.Path, StringComparer.OrdinalIgnoreCase),
+            ReportOrder.LargestAllocated => nodes.Where(n => n.TotalAllocatedBytes.HasValue).OrderByDescending(n => n.TotalAllocatedBytes).ThenBy(n => n.Path, StringComparer.OrdinalIgnoreCase),
             ReportOrder.Oldest => nodes.Where(n => n.ModifiedUtc.HasValue).OrderBy(n => n.ModifiedUtc).ThenBy(n => n.Path, StringComparer.OrdinalIgnoreCase),
             ReportOrder.Newest => nodes.Where(n => n.ModifiedUtc.HasValue).OrderByDescending(n => n.ModifiedUtc).ThenBy(n => n.Path, StringComparer.OrdinalIgnoreCase),
             _ => nodes.OrderByDescending(n => n.PathLength).ThenBy(n => n.Path, StringComparer.OrdinalIgnoreCase)

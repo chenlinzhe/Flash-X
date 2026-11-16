@@ -2,7 +2,7 @@ using FolderScope.Core;
 
 if (args.Length == 0 || args[0] is "-h" or "--help")
 {
-    Console.WriteLine("FolderScope — independent, read-only disk scan prototype");
+    Console.WriteLine("Flash - Folder (FF) — Windows disk usage and file size analysis");
     Console.WriteLine("folderscope scan <directory> [--directories-only] [--file-details new.jsonl] [--allocated-space] [--measure-retained-memory] [--export report.json|report.csv|report.xml]...");
     Console.WriteLine("--min-file-mib N and --min-dir-mib N list matching logical sizes (inclusive, 1024 MiB = 1 GiB). Exports stay complete.");
     Console.WriteLine("Existing output files are never overwritten. Ctrl+C cancels and marks a partial report.");
